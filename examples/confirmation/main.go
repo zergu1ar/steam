@@ -39,25 +39,26 @@ func main() {
 	}
 	log.Print("Web Api Key: ", key)
 
-	confirmations, err := client.GetConfirmations()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for i := range confirmations {
-		c := confirmations[i]
-		log.Printf("Confirmation ID: %d, Key: %d\n", c.ID, c.Key)
-		log.Printf("-> Title %s\n", c.Title)
-		log.Printf("-> Receiving %s\n", c.Receiving)
-		log.Printf("-> Since %s\n", c.Since)
-		log.Printf("-> OfferID %d\n", c.OfferID)
-
-		err = client.AnswerConfirmation(c, steam.AnswerDeny)
+	for j := 0; j < 25; j++ {
+		confirmations, err := client.GetConfirmations()
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		log.Printf("Declined %d\n", c.ID)
+		for _, c := range confirmations {
+			log.Printf("Confirmation ID: %d, Key: %d\n", c.ID, c.Key)
+			log.Printf("-> Title %s\n", c.Title)
+			log.Printf("-> Receiving %s\n", c.Receiving)
+			log.Printf("-> Since %s\n", c.Since)
+			log.Printf("-> OfferID %d\n", c.OfferID)
+
+			err = client.AnswerConfirmation(c, steam.AnswerDeny)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			log.Printf("Declined %d\n", c.ID)
+		}
 	}
 
 	log.Println("Bye!")

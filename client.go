@@ -1,7 +1,11 @@
 package steam
 
 import (
+	"context"
+	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -14,16 +18,21 @@ const (
 
 	LanguageEng = "english"
 	LanguageRus = "russian"
+
+	confirmationDelay = 3
 )
 
 type Client struct {
-	client      *http.Client
-	session     *OAuth
-	useragent   string
-	credentials *Credentials
-	apiKey      string
-	timeTip     int64
-	language    string
+	ctx          context.Context
+	client       *http.Client
+	session      *OAuth
+	useragent    string
+	credentials  *Credentials
+	apiKey       string
+	timeDiff     int64
+	language     string
+	Destroy      func()
+	requestQueue map[string]chan RequestItem
 }
 
 type Credentials struct {
@@ -32,6 +41,21 @@ type Credentials struct {
 	SharedSecret   string
 	IdentitySecret string
 }
+
+type (
+	RequestItem struct {
+		Url          string
+		Body         io.Reader
+		Params       url.Values
+		ResponseChan chan RequestResponse
+		Values       map[string]interface{}
+	}
+	RequestResponse struct {
+		Error  error
+		Body   []byte
+		Status int
+	}
+)
 
 func NewClient(client *http.Client, useragent string, language string, credentials *Credentials) (*Client, error) {
 	if useragent == "" {
@@ -45,16 +69,37 @@ func NewClient(client *http.Client, useragent string, language string, credentia
 		return nil, err
 	}
 
-	return &Client{
-		client:      client,
-		useragent:   useragent,
-		credentials: credentials,
-		language:    language,
-	}, nil
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queue := make(map[string]chan RequestItem)
+	queue["confirmation"] = make(chan RequestItem, 1000)
+
+	steamClient := &Client{
+		ctx:          ctx,
+		Destroy:      cancel,
+		client:       client,
+		useragent:    useragent,
+		credentials:  credentials,
+		language:     language,
+		requestQueue: queue,
+	}
+
+	timeTip, err := GetTimeTip()
+	if err != nil {
+		log.Fatal(err)
+	}
+	steamClient.timeDiff = timeTip.Time - time.Now().Unix()
+
+	// start goroutines to perform requests
+	go steamClient.confirmationReqWorker(confirmationDelay)
+	go steamClient.checkSession()
+
+	return steamClient, nil
 }
 
 func (c *Client) getTimeDiff() int64 {
-	return time.Now().Add(time.Duration(c.timeTip - time.Now().Unix())).Unix()
+	curTime := time.Now()
+	return curTime.Add(time.Duration(c.timeDiff)).Unix()
 }
 
 func (c *Client) GetSteamId() SteamID {

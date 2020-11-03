@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"net/http"
 	"net/http/cookiejar"
@@ -57,12 +56,6 @@ func (c *Client) Login() error {
 
 	var twoFactorCode string
 	if len(c.credentials.SharedSecret) != 0 {
-		timeTip, err := GetTimeTip()
-		if err != nil {
-			log.Fatal(err)
-		}
-		c.timeTip = timeTip.Time
-
 		if twoFactorCode, err = GenerateTwoFactorCode(c.credentials.SharedSecret, c.getTimeDiff()); err != nil {
 			return err
 		}

@@ -1,13 +1,15 @@
 package steam
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -27,31 +29,45 @@ type Confirmation struct {
 	OfferID   uint64
 }
 
+func (confirmation *Confirmation) Answer(client *Client, answer string) error {
+	return client.AnswerConfirmation(confirmation, answer)
+}
+
 type ConfirmationAnswerResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-func (confirmation *Confirmation) Answer(client *Client, answer string) error {
-	return client.AnswerConfirmation(confirmation, answer)
+func (c *Client) confirmationReqWorker(delay int64) {
+	for {
+		select {
+		case req := <-c.requestQueue["confirmation"]:
+			req.ResponseChan <- c.execConfirmationRequest(req.Url, req.Body, req.Params, nil)
+			time.Sleep(time.Second * time.Duration(delay))
+		case <-c.ctx.Done():
+			close(c.requestQueue["confirmation"])
+			return
+		}
+	}
 }
 
 func (c *Client) GetConfirmations() ([]*Confirmation, error) {
-	key, err := GenerateConfirmationCode(c.credentials.IdentitySecret, "confirmation", c.getTimeDiff())
-	if err != nil {
-		return nil, err
+	req := RequestItem{
+		Url: "conf?",
+		Params: url.Values{
+			"tag": {"confirmation"},
+		},
+		ResponseChan: make(chan RequestResponse),
+	}
+	c.requestQueue["confirmation"] <- req
+
+	resp := <-req.ResponseChan
+	close(req.ResponseChan)
+	if resp.Error != nil {
+		return nil, resp.Error
 	}
 
-	resp, err := c.execConfirmationRequest("conf?", key, "confirmation", c.getTimeDiff(), nil)
-	if resp != nil {
-		defer resp.Body.Close()
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	doc, err := goquery.NewDocumentFromReader(io.Reader(resp.Body))
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Body))
 	if err != nil {
 		return nil, err
 	}
@@ -101,15 +117,21 @@ func (c *Client) GetConfirmations() ([]*Confirmation, error) {
 	return confirmations, nil
 }
 
-func (c *Client) execConfirmationRequest(request, key, tag string, current int64, values map[string]interface{}) (*http.Response, error) {
-	params := url.Values{
-		"p":   {c.session.DeviceID},
-		"a":   {c.session.SteamID.ToString()},
-		"k":   {key},
-		"t":   {strconv.FormatInt(current, 10)},
-		"m":   {"android"},
-		"tag": {tag},
+func (c *Client) execConfirmationRequest(uri string, body io.Reader, params url.Values, values map[string]interface{}) RequestResponse {
+	key, err := GenerateConfirmationCode(c.credentials.IdentitySecret, "confirmation", c.getTimeDiff())
+	if err != nil {
+		return RequestResponse{
+			Error:  err,
+			Body:   []byte(""),
+			Status: http.StatusBadRequest,
+		}
 	}
+
+	params.Set("p", c.session.DeviceID)
+	params.Set("a", c.session.SteamID.ToString())
+	params.Set("t", strconv.FormatInt(c.getTimeDiff(), 10))
+	params.Set("m", "android")
+	params.Set("k", key)
 
 	for k, v := range values {
 		switch v := v.(type) {
@@ -117,36 +139,56 @@ func (c *Client) execConfirmationRequest(request, key, tag string, current int64
 			params.Add(k, v)
 		case uint64:
 			params.Add(k, strconv.FormatUint(v, 10))
-		default:
-			return nil, fmt.Errorf("execConfirmationRequest: missing implementation for type %v", v)
 		}
 	}
-	return c.client.Get(confirmationUrl + request + params.Encode())
+
+	respBody := []byte("")
+	resp, err := c.client.Get(confirmationUrl + uri + params.Encode())
+	if err != nil {
+		return RequestResponse{
+			Error:  err,
+			Body:   respBody,
+			Status: http.StatusBadRequest,
+		}
+	}
+
+	respBody, err = ioutil.ReadAll(resp.Body)
+	defer resp.Body.Close()
+
+	return RequestResponse{
+		Error:  err,
+		Body:   respBody,
+		Status: resp.StatusCode,
+	}
 }
 
 func (c *Client) AnswerConfirmation(confirmation *Confirmation, answer string) error {
-	key, err := GenerateConfirmationCode(c.credentials.IdentitySecret, answer, c.getTimeDiff())
-	if err != nil {
-		return err
-	}
-
 	op := map[string]interface{}{
 		"op":  answer,
 		"cid": confirmation.ID,
 		"ck":  confirmation.Key,
 	}
 
-	resp, err := c.execConfirmationRequest("ajaxop?", key, answer, c.getTimeDiff(), op)
-	if resp != nil {
-		defer resp.Body.Close()
+	req := RequestItem{
+		Url:  "ajaxop?",
+		Body: nil,
+		Params: url.Values{
+			"tag": {answer},
+		},
+		ResponseChan: make(chan RequestResponse),
+		Values:       op,
 	}
 
-	if err != nil {
-		return err
+	c.requestQueue["confirmation"] <- req
+
+	resp := <-req.ResponseChan
+
+	if resp.Error != nil {
+		return resp.Error
 	}
 
 	var response ConfirmationAnswerResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := json.Unmarshal(resp.Body, &response); err != nil {
 		return err
 	}
 
