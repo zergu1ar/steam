@@ -12,4 +12,6 @@ var (
 	ApiAccessDeniedError                  = errors.New("access denied to steam web api")
 	ConfirmationsNotFoundError            = errors.New("can't find confirmation")
 	ConfirmationsDescriptionNotFoundError = errors.New("can't find confirmation description")
+	ErrReceiptMatch                       = errors.New("unable to match items in trade receipt")
+	CannotFindTradeOfferInfoError         = errors.New("unable to match data from trade offer url")
 )

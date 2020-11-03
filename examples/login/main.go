@@ -15,7 +15,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client, err := steam.NewClient(new(http.Client), "", &steam.Credentials{
+	client, err := steam.NewClient(new(http.Client), "", "", &steam.Credentials{
 		Username:       os.Getenv("username"),
 		Password:       os.Getenv("password"),
 		SharedSecret:   os.Getenv("sharedSecret"),
