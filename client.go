@@ -98,8 +98,7 @@ func NewClient(client *http.Client, useragent string, language string, credentia
 }
 
 func (c *Client) getTimeDiff() int64 {
-	curTime := time.Now()
-	return curTime.Add(time.Duration(c.timeDiff)).Unix()
+	return time.Now().Unix() + c.timeDiff
 }
 
 func (c *Client) GetSteamId() SteamID {
