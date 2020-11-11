@@ -65,6 +65,11 @@ func (c *Client) Login() error {
 }
 
 func (c *Client) setupCookie() error {
+	// clear storage
+	if jar, err := cookiejar.New(nil); err == nil {
+		c.client.Jar = jar
+	}
+
 	req, err := http.NewRequest(
 		http.MethodGet,
 		loginUrl,
